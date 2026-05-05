@@ -1,0 +1,15 @@
+numpy==1.26.4
+opencv-python-headless==4.9.0.80
+ai-edge-litert
+picamera2==0.3.17
+adafruit-circuitpython-vl53l0x==3.6.10
+adafruit-blinka==8.38.0
+board==1.0
+easyocr
+argostranslate
+ultralytics==8.1.0
+piper-tts
+soundfile
+onnxruntime
+transformers
+Pillow

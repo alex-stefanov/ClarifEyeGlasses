@@ -1,0 +1,8 @@
+data/settings.json
+voices/*.onnx
+voices/*.json
+__pycache__/
+*.pyc
+*.pyo
+venv/
+logs/

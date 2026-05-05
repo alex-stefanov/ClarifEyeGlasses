@@ -1,0 +1,875 @@
+=== PROJECT OVERVIEW ===
+
+ClarifEye is a Raspberry Pi 4 wearable vision-assistance system designed for
+visually impaired people.  It mounts a camera, two HC-SR04 ultrasonic sensors
+(left/right), and a VL53L0X ToF sensor on a pair of glasses, and provides
+real-time spoken feedback via offline TTS (espeak-ng).  The system supports
+four operating modes: detecting traffic light colours (custom YOLOv8n), general
+obstacle navigation (SSD MobileNet V2 + Kalman sensor fusion), reading and
+translating text (Tesseract OCR + Google Translate with an offline phrase
+cache), and a dedicated night-vision mode that applies CLAHE enhancement before
+running the navigation pipeline.  Mode selection is physical — two GPIO push
+buttons cycle forward/back through modes.
+
+Languages / frameworks / runtime:
+  - Python 3.x (targets Pi OS Bookworm, tested on Python 3.11/3.13)
+  - TFLite inference via ai-edge-litert (Google's successor to tflite-runtime)
+  - Picamera2 for Pi Camera Module 3; OpenCV VideoCapture as fallback
+  - RPi.GPIO for ultrasonic sensors and buttons
+  - Adafruit CircuitPython for VL53L0X
+  - espeak-ng (system binary) for TTS via subprocess
+  - Tesseract (system binary) via pytesseract for OCR
+  - googletrans 4.0.0-rc1 for online translation fallback
+  - filterpy 1.4.5 listed (unused — custom Kalman filter is hand-rolled)
+  - pyttsx3 2.90 listed (unused — TTS goes through espeak-ng subprocess)
+
+Entry point:
+  python main.py          (runs ClarifEyeSystem.start(), blocks until SIGINT/SIGTERM)
+
+No systemd service file or autostart script is present in the repository.
+
+
+=== DIRECTORY TREE ===
+
+clarifeye/
+├── ai/
+│   ├── __init__.py
+│   ├── color_verifier.py       (5.9 KB)
+│   ├── detection.py            (2.9 KB)
+│   ├── low_light_enhancer.py   (4.8 KB)
+│   ├── object_detector.py     (21.0 KB)
+│   ├── text_reader.py          (4.6 KB)
+│   ├── traffic_light_detector.py (14.0 KB)
+│   └── translator.py          (14.0 KB)
+├── core/
+│   ├── __init__.py
+│   ├── mode_manager.py         (2.5 KB)
+│   ├── priority_engine.py      (5.2 KB)
+│   └── sensor_fusion.py       (19.0 KB)
+├── hardware/
+│   ├── __init__.py
+│   ├── audio.py                (7.8 KB)
+│   ├── buttons.py              (5.6 KB)
+│   ├── camera.py               (4.6 KB)
+│   ├── tof_sensor.py           (4.8 KB)
+│   └── ultrasonic.py           (6.7 KB)
+├── data/
+│   ├── common_phrases.json     (3.3 KB)  — bilingual phrase dictionary (en↔bg)
+│   └── translation_cache.json  (2 B)     — runtime translation cache (initially empty)
+├── logs/
+│   ├── .gitkeep
+│   └── clarifeye.log          (1.3 MB)  — rotating log (excluded from expansion)
+├── models/                               — ML model binaries (not expanded)
+│   ├── .gitkeep
+│   ├── coco_ssd_mobilenet_v2.tflite (4.0 MB)  — SSD MobileNet V2 INT8 COCO
+│   ├── traffic_light_yolov8n.tflite (5.9 MB)  — custom YOLOv8n INT8 traffic lights
+│   └── labelmap.txt            (665 B)   — COCO class names
+├── scripts/
+│   └── train_traffic_light.py (13.0 KB)  — YOLOv8 training script
+├── tests/
+│   ├── __init__.py
+│   ├── benchmark.py           (12.0 KB)
+│   ├── conftest.py             (5.5 KB)
+│   ├── test_audio.py          (18.0 KB)
+│   ├── test_camera.py          (5.3 KB)
+│   ├── test_detection.py      (16.0 KB)
+│   ├── test_integration.py    (21.0 KB)
+│   ├── test_sensor_fusion.py  (23.0 KB)
+│   ├── test_tof.py             (3.3 KB)
+│   └── test_ultrasonic.py      (5.3 KB)
+├── config.py                   (7.6 KB)  — single source of truth for all constants
+├── debug_file.py               (2.4 KB)  — test TL detection on an image file
+├── debug_main.py               (1.1 KB)  — test TL + color verifier on live frames
+├── debug_raw.py                (1.6 KB)  — inspect raw TFLite tensor output
+├── debug_tl.py                 (0.9 KB)  — quick 10-frame TL detection smoke test
+├── live_preview.py             (1.8 KB)  — HTTP live camera stream (port 8080)
+├── main.py                    (26.0 KB)  — main orchestrator (entry point)
+├── requirements.txt            (241 B)
+├── snapshot.py                 (3.2 KB)  — HTTP stream with bounding-box overlay
+└── test_models.py              (868 B)   — print TFLite I/O shapes
+
+Not present: .env file, systemd unit file, setup.py, pyproject.toml, Pipfile.
+venv/ is present on disk but excluded from this tree.
+
+
+=== DEPENDENCIES ===
+
+--- requirements.txt (verbatim) ---
+numpy==1.26.4
+opencv-python-headless==4.9.0.80
+ai-edge-litert
+picamera2==0.3.17
+adafruit-circuitpython-vl53l0x==3.6.10
+adafruit-blinka==8.38.0
+board==1.0
+easyocr==1.7.1
+googletrans==4.0.0-rc1
+filterpy==1.4.5
+pyttsx3==2.90
+ultralytics==8.1.0
+
+Notes:
+  - ai-edge-litert: TFLite inference runtime (Google's replacement for tflite-runtime)
+  - picamera2: Raspberry Pi camera library (requires libcamera system packages)
+  - adafruit-circuitpython-vl53l0x + adafruit-blinka + board: CircuitPython I2C stack
+  - googletrans 4.0.0-rc1: known to be unstable; uses undocumented Google endpoints
+  - filterpy: listed but NOT used — the Kalman filter is hand-rolled in sensor_fusion.py
+  - pyttsx3: listed but NOT used — TTS goes through espeak-ng subprocess in audio.py
+  - easyocr: listed but NOT used — text_reader.py uses pytesseract (NOT in requirements.txt)
+  - ultralytics: listed (used in scripts/train_traffic_light.py, NOT in runtime pipeline)
+
+System packages required (inferred from code / docs):
+  - espeak-ng         (TTS engine — sudo apt install espeak-ng)
+  - tesseract-ocr     (OCR engine — sudo apt install tesseract-ocr tesseract-ocr-bul)
+  - pytesseract       (Python wrapper — pip install pytesseract; NOT in requirements.txt)
+  - libcamera-dev     (for picamera2)
+  - python3-rpi.gpio  (for ultrasonic sensors and buttons)
+
+Hardware libraries in use:
+  - RPi.GPIO          — ultrasonic sensors (GPIO output/input timing) + buttons
+  - adafruit_vl53l0x  — ToF sensor via I2C
+  - picamera2         — Pi Camera Module 3
+  - cv2               — image processing throughout
+  - ai_edge_litert    — TFLite model inference
+
+
+=== HARDWARE CONFIGURATION ===
+
+All pin assignments use BCM (Broadcom) numbering unless stated otherwise.
+
+--- Ultrasonic Sensors (HC-SR04) ---
+Left sensor:
+  TRIG:  GPIO 17  (Physical Pin 11)
+  ECHO:  GPIO 27  (Physical Pin 13) — via 1 kΩ / 2 kΩ voltage divider to 3.3 V
+
+Right sensor:
+  TRIG:  GPIO 22  (Physical Pin 15)
+  ECHO:  GPIO 23  (Physical Pin 16) — via 1 kΩ / 2 kΩ voltage divider to 3.3 V
+
+Wiring note: HC-SR04 ECHO is 5 V; the divider steps it down before the Pi GPIO.
+Trigger pulse: 10 µs HIGH.
+Valid range: 2–400 cm.  Readings outside this are returned as None.
+Polling interval: 30 ms (sensor_thread sleep), satisfying the ≥ 25 ms HC-SR04 requirement.
+Both sensors are read sequentially (left then right) to avoid acoustic cross-talk.
+
+--- ToF Sensor (VL53L0X) ---
+Interface:    I2C bus 1 (board.SCL = GPIO 3 / Pin 5, board.SDA = GPIO 2 / Pin 3)
+I2C address:  0x29 (default)
+Timing budget: 33 000 µs (33 ms) — balance between speed and accuracy
+Valid range:  0 < distance ≤ 200 cm (returns None outside this)
+Driver:       adafruit_vl53l0x via CircuitPython / busio
+
+--- Buttons ---
+NEXT MODE:  GPIO 24  (Physical Pin 18) — active-LOW, internal pull-up
+PREV MODE:  GPIO 25  (Physical Pin 22) — active-LOW, internal pull-up
+Debounce:   300 ms (software, per-pin timestamp)
+Interrupt:  FALLING edge (RPi.GPIO add_event_detect)
+
+--- Camera ---
+Module:       Raspberry Pi Camera Module 3
+Backend:      picamera2 (falls back to OpenCV VideoCapture(0))
+Resolution:   640 × 640 px (square, for YOLO compatibility)
+Format:       RGB888 (3-channel, 8-bit)
+Frame rate:   30 FPS target
+Buffers:      2 (double buffering)
+
+--- Audio Output ---
+Device:       espeak-ng via subprocess (headphone jack / USB DAC, OS default)
+Voice:        "en" for both TTS_VOICE_BG and TTS_VOICE_EN (both configured as "en" in config.py — Bulgarian voice not enabled)
+Speed:        155 words per minute
+
+--- No haptic / vibration motor present ---
+--- No LED feedback present ---
+
+
+=== MODES OF OPERATION ===
+
+Mode switching: physical buttons on the glasses frame.
+  - GPIO 24 (NEXT_MODE): advance to the next mode (wraps around)
+  - GPIO 25 (PREV_MODE): go to the previous mode (wraps around)
+  On switch, audio queue is flushed, any playing TTS is killed, and the new
+  mode name is announced in English at HIGH priority.
+
+Default mode at startup: TRAFFIC_LIGHT (mode index 0)
+
+--- Mode 0: TRAFFIC_LIGHT ---
+Purpose: Detect and announce traffic light colour at intersections.
+Sensors: Camera only (sensors not used in this pipeline).
+AI:      Custom-trained YOLOv8n TFLite (INT8) + HSV pixel-count verifier.
+Feedback: Bulgarian TTS announcement of colour.
+  - Red / Yellow → HIGH audio priority (6-second cooldown per colour)
+  - Green         → NORMAL audio priority
+  - Colour strings: "Red traffic light", "Yellow traffic light", "Green traffic light"
+  - Auto-CLAHE enhancement applied first if frame is dark.
+Activation: Button press to cycle to mode index 0.
+
+--- Mode 1: NAVIGATION ---
+Purpose: Detect obstacles and announce highest-threat object with direction and distance.
+Sensors: Camera + left HC-SR04 + right HC-SR04 + VL53L0X ToF.
+AI:      SSD MobileNet V2 TFLite (COCO, 25 filtered classes).
+Fusion:  Per-object Kalman filter combining camera pinhole estimate with sensor readings.
+Priority: Threat score = base_score × (1 − dist/500) × velocity_boost.
+Feedback: English TTS. Examples:
+  - "Warning! Car 80 centimeters ahead"
+  - "Person 1.5 meters on the left"
+  - "Bus on the right"
+  - One object per cycle (MAX_NOTIFICATION_OBJECTS = 1), 6-second cooldown per object.
+  - Critical threat (score ≥ 8.0) → AUDIO_PRIORITY_CRITICAL (kills current audio).
+  - Auto-CLAHE enhancement applied first if frame is dark.
+Activation: Button press to cycle to mode index 1.
+
+--- Mode 2: TEXT_READING ---
+Purpose: Read text in the scene, translate English to Bulgarian, speak the result.
+Sensors: Camera only.
+AI:      Tesseract OCR (pytesseract, psm 6) with adaptive thresholding preprocessing.
+         English + Bulgarian text detection (Cyrillic ratio heuristic).
+Translation:
+  - Common phrases → offline bilingual JSON cache (data/common_phrases.json)
+  - Cache miss      → Google Translate fallback (3-second timeout)
+  - Bulgarian text  → spoken directly without translation
+Feedback: English or Bulgarian TTS at NORMAL priority.
+          2-second pause after a frame with text, so TTS has time to complete.
+  - Auto-CLAHE applied first if dark.
+Activation: Button press to cycle to mode index 2.
+
+--- Mode 3: LOW_LIGHT (Night Vision) ---
+Purpose: Same as NAVIGATION but with unconditional CLAHE enhancement (brightness
+         check bypassed — enhancement is always applied).
+Sensors: Same as NAVIGATION.
+AI:      Same as NAVIGATION (SSD MobileNet V2 + fusion + priority engine).
+Feedback: Same as NAVIGATION.
+Activation: Button press to cycle to mode index 3.
+
+
+=== KEY FILES ===
+
+--- config.py ---
+config.py
+"""
+ClarifEye System Configuration
+All hardware pins, model paths, thresholds, and constants.
+"""
+import os
+from dataclasses import dataclass, field
+from typing import Dict, Tuple, List
+from enum import IntEnum, auto
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODELS_DIR = os.path.join(BASE_DIR, "models")
+DATA_DIR   = os.path.join(BASE_DIR, "data")
+LOGS_DIR   = os.path.join(BASE_DIR, "logs")
+
+# GPIO (BCM)
+ULTRASONIC_LEFT_TRIG  = 17    # Physical Pin 11
+ULTRASONIC_LEFT_ECHO  = 27    # Physical Pin 13 (1kΩ/2kΩ divider)
+ULTRASONIC_RIGHT_TRIG = 22    # Physical Pin 15
+ULTRASONIC_RIGHT_ECHO = 23    # Physical Pin 16 (1kΩ/2kΩ divider)
+
+TOF_I2C_BUS        = 1
+TOF_I2C_ADDRESS    = 0x29
+TOF_TIMING_BUDGET_US = 33000
+
+BUTTON_NEXT_MODE   = 24       # Physical Pin 18
+BUTTON_PREV_MODE   = 25       # Physical Pin 22
+BUTTON_DEBOUNCE_MS = 300
+
+CAMERA_RESOLUTION  = (640, 640)
+CAMERA_FRAMERATE   = 30
+CAMERA_FORMAT      = "RGB888"
+CAMERA_BUFFER_COUNT = 2
+FRAME_QUEUE_MAXSIZE = 2
+
+TRAFFIC_LIGHT_MODEL_PATH         = os.path.join(MODELS_DIR, "traffic_light_yolov8n.tflite")
+TRAFFIC_LIGHT_CONFIDENCE_THRESHOLD = 0.55
+TRAFFIC_LIGHT_IOU_THRESHOLD       = 0.45
+TRAFFIC_LIGHT_CLASSES = {0: "red", 1: "yellow", 2: "green"}
+
+OBJECT_MODEL_PATH             = os.path.join(MODELS_DIR, "coco_ssd_mobilenet_v2.tflite")
+OBJECT_CONFIDENCE_THRESHOLD   = 0.45
+OBJECT_IOU_THRESHOLD          = 0.45
+OBJECT_CLASSES_OF_INTEREST = {
+    0: "person", 1: "bicycle", 2: "car", 3: "motorcycle", 5: "bus", 7: "truck",
+    9: "traffic_light", 10: "fire_hydrant", 11: "stop_sign", 13: "bench",
+    56: "chair", 57: "couch", 59: "bed", 60: "dining_table", 62: "tv",
+    63: "laptop", 72: "refrigerator", 73: "book",
+}
+
+HSV_RED_LOWER_1 = (0, 70, 50);   HSV_RED_UPPER_1 = (10, 255, 255)
+HSV_RED_LOWER_2 = (170, 70, 50); HSV_RED_UPPER_2 = (180, 255, 255)
+HSV_YELLOW_LOWER = (15, 70, 50); HSV_YELLOW_UPPER = (35, 255, 255)
+HSV_GREEN_LOWER  = (35, 70, 50); HSV_GREEN_UPPER  = (85, 255, 255)
+COLOR_PIXEL_RATIO_THRESHOLD = 0.15
+
+@dataclass
+class KalmanConfig:
+    process_noise: float              = 0.1
+    measurement_noise_camera: float   = 0.5
+    measurement_noise_ultrasonic: float = 0.15
+    measurement_noise_tof: float      = 0.05
+    initial_covariance: float         = 1.0
+    tof_priority_range_cm: float      = 200.0
+    ultrasonic_priority_range_cm: float = 300.0
+
+KALMAN = KalmanConfig()
+
+KNOWN_HEIGHTS = {
+    "person": 1.7, "car": 1.5, "bus": 3.0, "truck": 3.5,
+    "bicycle": 1.0, "motorcycle": 1.1, "traffic_light": 0.3,
+}
+CAMERA_FOCAL_LENGTH_PX = 500.0   # ~(4.74/6.287)*640 for Pi Camera v3
+
+class ThreatLevel(IntEnum):
+    CRITICAL = 10; HIGH = 7; MEDIUM = 5; LOW = 3; INFO = 1
+
+THREAT_BASE_SCORES = {
+    "car": ThreatLevel.CRITICAL, "bus": ThreatLevel.CRITICAL,
+    "truck": ThreatLevel.CRITICAL, "motorcycle": ThreatLevel.HIGH,
+    "bicycle": ThreatLevel.HIGH, "person": ThreatLevel.MEDIUM,
+    "fire_hydrant": ThreatLevel.LOW, "stop_sign": ThreatLevel.LOW,
+    "bench": ThreatLevel.LOW, "chair": ThreatLevel.LOW,
+    "traffic_light": ThreatLevel.INFO,
+}
+
+DISTANCE_CRITICAL_CM = 100; DISTANCE_CLOSE_CM = 200; DISTANCE_MEDIUM_CM = 400
+MAX_NOTIFICATION_OBJECTS = 1
+NOTIFICATION_COOLDOWN_SEC = 6.0
+
+TTS_ENGINE    = "espeak-ng"
+TTS_VOICE_BG  = "en"   # NOTE: should be "bg" for Bulgarian — see bug notes
+TTS_VOICE_EN  = "en"
+TTS_SPEED     = 155
+AUDIO_PRIORITY_CRITICAL = 0
+AUDIO_PRIORITY_HIGH     = 1
+AUDIO_PRIORITY_NORMAL   = 2
+AUDIO_PRIORITY_LOW      = 3
+
+OCR_LANGUAGES = ["bg", "en"]
+OCR_CONFIDENCE_THRESHOLD = 0.3
+OCR_GPU = False
+
+TRANSLATION_CACHE_PATH  = os.path.join(DATA_DIR, "translation_cache.json")
+COMMON_PHRASES_PATH     = os.path.join(DATA_DIR, "common_phrases.json")
+TRANSLATION_SOURCE_LANG = "en"
+TRANSLATION_TARGET_LANG = "bg"
+
+CLAHE_CLIP_LIMIT          = 3.0
+CLAHE_TILE_GRID_SIZE      = (8, 8)
+LOW_LIGHT_BRIGHTNESS_THRESHOLD = 60
+
+THREAD_QUEUE_TIMEOUT_SEC = 0.05
+
+class Mode(IntEnum):
+    TRAFFIC_LIGHT = 0
+    NAVIGATION    = 1
+    TEXT_READING  = 2
+    LOW_LIGHT     = 3
+
+MODE_NAMES = {
+    Mode.TRAFFIC_LIGHT: "Traffic light mode",
+    Mode.NAVIGATION:    "Navigation mode",
+    Mode.TEXT_READING:  "Text reading mode",
+    Mode.LOW_LIGHT:     "Night vision mode",
+}
+DEFAULT_MODE = Mode.TRAFFIC_LIGHT
+NUM_MODES    = len(Mode)
+
+LOG_FILE         = os.path.join(LOGS_DIR, "clarifeye.log")
+LOG_LEVEL        = "INFO"
+LOG_FORMAT       = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+LOG_MAX_BYTES    = 10 * 1024 * 1024
+LOG_BACKUP_COUNT = 3
+
+
+--- main.py (entry point + orchestrator, key sections) ---
+main.py
+# Full file is 679 lines.  The sections below cover the full logic.
+
+class ClarifEyeSystem:
+    """
+    Owns all hardware/AI modules and three worker threads.
+    Thread model:
+      camera_thread     — capture frames → bounded queue (drop oldest when full)
+      sensor_thread     — poll ultrasonic + ToF every 30 ms → shared dict
+      processing_thread — dequeue frames → dispatch to mode pipeline → audio
+    """
+
+    def __init__(self):
+        self._stopping  = threading.Event()
+        self._setup_logging()
+        self._audio     = AudioManager();   self._audio.start()
+        self._camera    = CameraModule()
+        self._ultrasonic = DualUltrasonic()
+        self._tof       = ToFSensor()
+        self._mode_manager  = ModeManager(self._audio)
+        self._buttons   = ButtonHandler(self._mode_manager.next_mode,
+                                        self._mode_manager.prev_mode)
+        self._tl_detector    = TrafficLightDetector()
+        self._obj_detector   = ObjectDetector()
+        self._color_verifier = ColorVerifier()
+        self._text_reader    = TextReader()
+        self._translator     = Translator()
+        self._low_light      = LowLightEnhancer()
+        self._sensor_fusion  = SensorFusion()
+        self._priority_engine = PriorityEngine(self._audio)
+        self._frame_queue    = queue.Queue(maxsize=FRAME_QUEUE_MAXSIZE)
+        self._running        = threading.Event()
+        self._sensor_data    = {"left_cm": None, "right_cm": None,
+                                "tof_cm": None, "timestamp": 0.0}
+        self._sensor_lock    = threading.Lock()
+        signal.signal(signal.SIGINT,  self._handle_signal)
+        signal.signal(signal.SIGTERM, self._handle_signal)
+
+    def start(self):
+        self._audio.speak("ClarifEye starting", AUDIO_PRIORITY_HIGH, "en")
+        self._camera.start()
+        self._running.set()
+        # Start: camera, processing, sensor threads (daemon=True)
+        time.sleep(0.3)
+        self._audio.speak(self._mode_manager.get_mode_name(),
+                          AUDIO_PRIORITY_NORMAL, "en")
+        while self._running.is_set():   # block main thread
+            time.sleep(0.1)
+
+    def stop(self):
+        # idempotent; announces "System stopping"; joins threads (5s timeout)
+        # releases in reverse order: audio, buttons, tof, ultrasonic, camera
+
+    # --- camera_thread ---
+    # Captures frame; if queue full, discards oldest; puts new frame.
+    # 10 ms sleep on error/None frame.
+
+    # --- sensor_thread ---
+    # Every 30 ms: reads left/right ultrasonic, reads ToF.
+    # Stores results under _sensor_lock in _sensor_data.
+
+    # --- processing_thread ---
+    # Dequeues frame (50 ms timeout), reads mode and sensor_data under lock,
+    # calls _process_frame(). Logs FPS every 30 s, memory every 60 s.
+
+    def _process_frame(self, frame, mode, sensor_data, dt):
+        if mode == Mode.TRAFFIC_LIGHT:  self._process_traffic_light(frame)
+        elif mode == Mode.NAVIGATION:   self._process_navigation(frame, sensor_data, dt)
+        elif mode == Mode.TEXT_READING: self._process_text_reading(frame)
+        elif mode == Mode.LOW_LIGHT:    self._process_low_light(frame, sensor_data, dt)
+
+    def _process_traffic_light(self, frame):
+        frame, _ = self._low_light.auto_enhance(frame)
+        detections = self._tl_detector.detect(frame)
+        for det in detections:
+            verified = self._color_verifier.verify_traffic_light_color(frame, det.bbox)
+            if verified: det.class_name = verified
+            message = _TL_MESSAGES_BG.get(det.class_name)
+            priority = HIGH if det.class_name in ("red","yellow") else NORMAL
+            self._audio.speak(message, priority, "en")  # BUG: bare `en` — NameError
+
+    def _process_navigation(self, frame, sensor_data, dt):
+        frame, _ = self._low_light.auto_enhance(frame)
+        self._run_navigation_pipeline(frame, sensor_data, dt)
+
+    def _process_text_reading(self, frame):
+        frame, _ = self._low_light.auto_enhance(frame)
+        text_dets = self._text_reader.read_text(frame)
+        for td in text_dets:
+            self._translator.translate_and_speak(td.text, self._audio)
+        if text_dets:
+            for _ in range(20): time.sleep(0.1)   # 2-second post-text pause
+
+    def _process_low_light(self, frame, sensor_data, dt):
+        frame = self._low_light.enhance(frame)   # unconditional
+        self._run_navigation_pipeline(frame, sensor_data, dt)
+
+    def _run_navigation_pipeline(self, frame, sensor_data, dt):
+        detections = self._obj_detector.detect(frame)
+        detections = self._sensor_fusion.fuse(
+            detections,
+            sensor_data.get("left_cm"), sensor_data.get("right_cm"),
+            sensor_data.get("tof_cm"), frame_w, frame_h, dt)
+        self._priority_engine.process_detections(detections)
+
+if __name__ == "__main__":
+    system = ClarifEyeSystem()
+    try:    system.start()
+    except KeyboardInterrupt: pass
+    finally: system.stop()
+
+
+--- hardware/ultrasonic.py ---
+hardware/ultrasonic.py
+class UltrasonicSensor:
+    """Single HC-SR04.  10 µs trigger, timed echo, 2–400 cm valid range."""
+    def __init__(self, trig_pin, echo_pin, name):
+        GPIO.setmode(GPIO.BCM)
+        GPIO.setup(trig, GPIO.OUT, initial=GPIO.LOW)
+        GPIO.setup(echo, GPIO.IN)
+
+    def measure_distance_cm(self):
+        GPIO.output(trig, LOW); sleep(2µs)
+        GPIO.output(trig, HIGH); sleep(10µs); GPIO.output(trig, LOW)
+        # Wait for echo HIGH (50 ms timeout), then for echo LOW
+        distance_cm = (elapsed_s × 34300) / 2
+        return None if < 2.0 or > 400.0 else round(distance_cm, 1)
+
+class DualUltrasonic:
+    """Wraps left + right sensors.  measure_both() → (left_cm, right_cm)."""
+    # Sequential reads to avoid acoustic cross-talk.
+
+
+--- hardware/tof_sensor.py ---
+hardware/tof_sensor.py
+class ToFSensor:
+    """VL53L0X over I2C bus 1, address 0x29."""
+    def __init__(self):
+        self._i2c   = busio.I2C(board.SCL, board.SDA)
+        self._sensor = adafruit_vl53l0x.VL53L0X(self._i2c, address=0x29)
+        self._sensor.measurement_timing_budget = 33000
+
+    def measure_distance_cm(self):
+        range_mm = self._sensor.range      # Returns mm
+        if range_mm <= 0 or range_mm > 2000: return None
+        return round(range_mm / 10.0, 1)
+
+    def is_available(self) -> bool:
+        # Live I2C probe — reads range register
+
+
+--- hardware/audio.py ---
+hardware/audio.py
+class AudioManager:
+    """Priority queue TTS via espeak-ng subprocess.  Single daemon worker thread."""
+
+    def speak(self, text, priority=NORMAL, language="bg"):
+        self._queue.put((priority, time.time(), text, language))
+        if priority == CRITICAL:
+            self._current_process.kill()   # interrupt immediately
+
+    # _speak_worker():
+    #   dequeues; checks cooldown (NOTIFICATION_COOLDOWN_SEC = 6 s);
+    #   evicts expired cooldown entries;
+    #   subprocess.Popen(["espeak-ng", "-v", voice, "-s", "155", text]).wait()
+
+    # Cooldown is per-text-string.  Same text within 6 s is silently dropped.
+
+
+--- hardware/buttons.py ---
+hardware/buttons.py
+class ButtonHandler:
+    """FALLING-edge GPIO interrupts with 300 ms software debounce."""
+    # GPIO 24 (NEXT), GPIO 25 (PREV); active-LOW; internal pull-up.
+    # Callbacks: on_next_mode(), on_prev_mode() — supplied by ModeManager.
+
+
+--- hardware/camera.py ---
+hardware/camera.py
+class CameraModule:
+    """picamera2 primary, OpenCV VideoCapture(0) fallback."""
+    # 640×640 RGB888, 30 FPS, 2 buffers.
+    # capture_frame() → RGB ndarray or None.
+    # OpenCV frames are converted BGR→RGB before returning.
+
+
+--- core/mode_manager.py (full file) ---
+core/mode_manager.py
+class ModeManager:
+    def __init__(self, audio_manager):
+        self._mode = config.DEFAULT_MODE
+        self._lock = threading.Lock()
+        self._audio = audio_manager
+
+    def next_mode(self):
+        with self._lock:
+            new_index = (int(self._mode) + 1) % config.NUM_MODES
+            self._mode = config.Mode(new_index)
+        self._flush_audio()
+        self._audio.speak(name, AUDIO_PRIORITY_HIGH, "en")
+
+    def prev_mode(self):
+        # Same as next_mode() but decrements index
+
+    def get_current_mode(self): ...
+    def get_mode_name(self):    ...
+
+    def _flush_audio(self):
+        # Drains self._audio._queue (accesses private attribute directly)
+        # Kills self._audio._current_process if running
+        # NOTE: directly accesses private internals of AudioManager
+
+
+--- core/sensor_fusion.py (key sections) ---
+core/sensor_fusion.py
+# State: [distance_cm, velocity_cm_s].  Motion model: constant velocity.
+# Tracker key: f"{class_name}_{position}"  e.g. "person_center"
+# Stale timeout: 2 seconds.
+
+class SingleObjectKalman:
+    def predict(self, dt):
+        F = [[1, dt], [0, 1]]
+        Q = q * I₂
+        x = F @ x; P = F @ P @ Fᵀ + Q; x[0] = max(0, x[0])
+
+    def update(self, measurement, noise):
+        y = z - x[0]; S = P[0,0] + R; K = P[:,0] / S
+        x = x + K*y; P = (I - K⊗[1,0]) @ P
+        P = (P + Pᵀ) / 2      # symmetrise
+
+class SensorFusion:
+    def fuse(self, detections, left_cm, right_cm, tof_cm, fw, fh, dt):
+        for det in detections:
+            # 1. Compute camera pinhole distance if missing
+            # 2. Assign position (left/center/right) from center_x
+            # 3. Select measurement:
+            #    CENTER + tof < 200 cm  → tof  (noise = 0.05)
+            #    relevant_us < 300 cm   → us   (noise = 0.15)
+            #    camera estimate        → cam  (noise = 0.50)
+            #    none available         → predict-only
+            # 4. Kalman predict + update (or create tracker)
+            # 5. Write fused_distance_cm back onto Detection
+
+
+--- core/priority_engine.py ---
+core/priority_engine.py
+class PriorityEngine:
+    def process_detections(self, detections):
+        # For each detection:
+        #   score = base × (1 - dist/500) × velocity_boost(1.5 if approaching)
+        # Sort descending by score; pick top MAX_NOTIFICATION_OBJECTS = 1.
+        # Skip if object_id was announced within NOTIFICATION_COOLDOWN_SEC (6 s).
+        # Build message; speak.
+
+    def _build_message(self, det):
+        if dist < 100 cm: "Warning! {label} {dist} centimeters {position}"
+        elif dist < 300 cm: "{label} {dist/100:.1f} meters {position}"
+        else: "{label} {position}"
+
+    def _audio_priority(self, score):
+        if score >= 8.0: CRITICAL
+        if score >= 5.0: HIGH
+        if score >= 3.0: NORMAL
+        else:            LOW
+
+
+--- ai/detection.py (full file) ---
+ai/detection.py
+@dataclass
+class Detection:
+    bbox:                  Tuple[int,int,int,int]  # (x1,y1,x2,y2) pixel space
+    class_id:              int
+    class_name:            str
+    confidence:            float                   # [0.0, 1.0]
+    center_x:              int
+    center_y:              int
+    position:              str = "center"          # "left"|"center"|"right"
+    estimated_distance_cm: Optional[float] = None  # pinhole model
+    sensor_distance_cm:    Optional[float] = None  # raw sensor reading
+    fused_distance_cm:     Optional[float] = None  # Kalman output
+    threat_score:          float = 0.0
+
+
+--- ai/traffic_light_detector.py (summary) ---
+# Model: traffic_light_yolov8n.tflite (custom YOLOv8n, INT8, 640×640)
+# Input: [1, 640, 640, 3].  Handles float32, uint8, int8 quantisation.
+# Output: [1, 8400, 7] OR [1, 7, 8400] — normalised internally to [8400, 7].
+# Columns 0-3: cx, cy, w, h (normalised to model input size).
+# Columns 4-6: sigmoid class scores (red, yellow, green).
+# Postprocessing: sigmoid activation, confidence filter (0.55),
+#   pure-NumPy NMS (IoU threshold 0.45).
+# Returns: List[Detection]
+
+
+--- ai/object_detector.py (summary) ---
+# Model: coco_ssd_mobilenet_v2.tflite (INT8, 300×300 input)
+# Output: 4 tensors — boxes [1,N,4], class_ids [1,N], scores [1,N], count [1]
+# Tensor role identification: lazy, first non-empty inference.
+#   max > 1.0 → class IDs; integer-likeness test as tiebreaker.
+# Distance: pinhole model per class using KNOWN_HEIGHTS.
+# Returns: List[Detection] filtered to OBJECT_CLASSES_OF_INTEREST
+
+
+--- ai/text_reader.py ---
+ai/text_reader.py
+class TextReader:
+    """Tesseract OCR (pytesseract) — English only in practice despite config."""
+    def __init__(self):
+        self._lang_string = "eng"   # Hardcoded; ignores OCR_LANGUAGES config
+
+    def read_text(self, frame) -> List[TextDetection]:
+        # RGB → grayscale → GaussianBlur(3,3) → adaptiveThreshold(GAUSSIAN_C, psm 6)
+        # pytesseract.image_to_data() with lang="eng"
+        # Filter: conf >= 60, text has ≥2 consecutive letters, avg line conf ≥ 50%
+        # Group words into lines by line_num
+        # Detect language per line (Cyrillic ratio > 50% → "bg", else "en")
+        # Returns List[TextDetection(bbox, text, confidence, language)]
+
+
+--- ai/translator.py (summary) ---
+# Two-level cache: static phrases (common_phrases.json) + runtime JSON cache.
+# Key format: "{src}_{tgt}:{text_lower}" e.g. "en_bg:exit"
+# Resolution order: static cache → runtime cache → Google Translate (3 s timeout)
+# Cyrillic input is treated as Bulgarian and returned unchanged.
+# Thread-safe: _lock guards all mutable state.
+# Logs stats every 50 calls.
+# translate_and_speak(text, audio_manager): translates then calls audio.speak().
+
+
+--- ai/low_light_enhancer.py ---
+ai/low_light_enhancer.py
+class LowLightEnhancer:
+    def __init__(self):
+        self._clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
+
+    def is_low_light(self, frame) -> bool:
+        # Mean grayscale brightness < 60 → True
+
+    def enhance(self, frame) -> np.ndarray:
+        # RGB → LAB → CLAHE(L only) → LAB → RGB
+        # Target: < 5 ms per 640×640 on Pi 4
+
+    def auto_enhance(self, frame) -> (frame, enhanced_bool):
+        # Applies enhance() only when is_low_light() returns True
+
+
+--- ai/color_verifier.py ---
+ai/color_verifier.py
+class ColorVerifier:
+    def verify_traffic_light_color(self, frame, bbox) -> Optional[str]:
+        # Delegates to get_dominant_color(); returns None if no color > threshold
+
+    def get_dominant_color(self, frame, bbox) -> (color_str, ratio):
+        # Crop bbox from RGB frame → cv2.COLOR_RGB2HSV
+        # Count red (two arcs: 0-10° and 170-180°), yellow (15-35°), green (35-85°)
+        # Return best if ratio > COLOR_PIXEL_RATIO_THRESHOLD (0.15)
+
+
+=== DATA FLOW ===
+
+TRAFFIC_LIGHT mode:
+  Pi Camera → (640×640 RGB ndarray) → CameraModule.capture_frame()
+  → frame_queue → processing_thread
+  → [if dark] LowLightEnhancer.auto_enhance()
+  → TrafficLightDetector.detect()  [YOLOv8n TFLite, NMS]
+  → ColorVerifier.verify_traffic_light_color()  [HSV pixel count, may override class_name]
+  → AudioManager.speak("Red/Yellow/Green traffic light", priority, "en")
+  → espeak-ng subprocess → speaker
+
+NAVIGATION mode:
+  Pi Camera → frame_queue → processing_thread
+  sensor_thread (30 ms loop) → left_cm, right_cm (HC-SR04), tof_cm (VL53L0X)
+                             → _sensor_data dict (under _sensor_lock)
+  → [if dark] LowLightEnhancer.auto_enhance()
+  → ObjectDetector.detect()  [SSD MobileNet V2, 25-class COCO filter]
+      → each Detection gets estimated_distance_cm (pinhole model)
+  → SensorFusion.fuse()
+      → assign position (left/center/right from center_x / frame_width)
+      → select sensor: ToF (center, <200 cm) > ultrasonic (side/<300 cm) > camera
+      → SingleObjectKalman.predict(dt) + update(measurement, noise)
+      → write fused_distance_cm onto Detection
+  → PriorityEngine.process_detections()
+      → score = base × (1 - d/500) × velocity_boost
+      → sort, pick top-1, check 6-second cooldown
+      → build English message
+      → AudioManager.speak(message, priority, "en")
+      → espeak-ng subprocess → speaker
+
+TEXT_READING mode:
+  Pi Camera → frame_queue → processing_thread
+  → [if dark] LowLightEnhancer.auto_enhance()
+  → TextReader.read_text()
+      → grayscale → GaussianBlur → adaptiveThreshold
+      → pytesseract.image_to_data(lang="eng")
+      → group into lines, filter confidence, detect language (Cyrillic heuristic)
+  → for each TextDetection:
+      Translator.translate_and_speak(text, audio)
+      → check static phrase cache → runtime cache → Google Translate (3 s timeout)
+      → AudioManager.speak(translated_text, NORMAL, "bg" or "en")
+      → espeak-ng subprocess → speaker
+  → 2-second pause after frame with text
+
+LOW_LIGHT mode:
+  Same as NAVIGATION except LowLightEnhancer.enhance() is called unconditionally
+  (brightness check bypassed).
+
+
+=== EXTERNAL SERVICES / APIs ===
+
+Google Translate (googletrans 4.0.0-rc1):
+  - Used as fallback in TEXT_READING mode only.
+  - Called via googletrans.Translator (unofficial API; uses undocumented endpoints).
+  - 3-second timeout enforced via ThreadPoolExecutor future.
+  - If offline or error, original text is returned unchanged.
+  - No API key required (uses unofficial endpoint).
+
+No other cloud services or external APIs.
+
+ML model files (local, bundled in models/):
+  - models/traffic_light_yolov8n.tflite  (custom-trained, 5.9 MB)
+  - models/coco_ssd_mobilenet_v2.tflite  (pre-trained COCO, 4.0 MB)
+
+Inference is fully offline; both models run on CPU via ai-edge-litert (TFLite).
+
+
+=== KNOWN ISSUES / TODOs ===
+
+No TODO / FIXME / HACK / XXX comments exist in project source files.
+All such markers found during grep were exclusively in venv/ (third-party packages).
+
+BUGS observed during code review:
+
+1. main.py:472 — NameError at runtime in TRAFFIC_LIGHT mode:
+     self._audio.speak(message, priority, en)
+   `en` is a bare name, not the string "en".  This will raise NameError every
+   time a traffic light is detected, silencing all TL announcements.
+   Fix: change `en` to `"en"`.
+
+2. config.py:151 — TTS_VOICE_BG = "en" (should likely be "bg"):
+   Both TTS_VOICE_BG and TTS_VOICE_EN are set to "en".
+   Bulgarian TTS will use the English espeak-ng voice instead of a Bulgarian
+   voice.  To enable Bulgarian: TTS_VOICE_BG = "bg" (requires espeak-ng-data
+   package with Bulgarian voice; verify with `espeak-ng --voices | grep bg`).
+
+3. text_reader.py:39 — TextReader hardcodes lang="eng" (Tesseract English only):
+   Despite config.OCR_LANGUAGES = ["bg", "en"] and the translator being set up
+   for Bulgarian, TextReader never passes the Bulgarian language to Tesseract.
+   Cyrillic text in a frame will not be recognised.
+   Fix: self._lang_string = "eng+bul" (requires tesseract-ocr-bul installed).
+
+4. requirements.txt — mismatch between listed and used libraries:
+   - pytesseract (used in text_reader.py) is NOT listed.
+   - easyocr (listed) is NOT used anywhere in the codebase.
+   - The main.py docstring says "EasyOCR loads on first use" — stale comment.
+   - filterpy (listed) is NOT used — hand-rolled Kalman in sensor_fusion.py.
+   - pyttsx3 (listed) is NOT used — TTS goes through espeak-ng subprocess.
+
+5. core/mode_manager.py:62-70 — _flush_audio() accesses private internals:
+   Directly reads self._audio._queue and self._audio._current_process.
+   This couples ModeManager tightly to AudioManager's internal structure.
+   A public AudioManager.flush() method would be cleaner.
+
+6. Sensor focal length is approximate:
+   config.py:113-116: CAMERA_FOCAL_LENGTH_PX = 500.0  (comment says ~482 for Pi
+   Camera v3; using 500 as "safe starting point").  Distance estimates from the
+   pinhole model will have proportional error until calibrated.
+
+
+=== SUGGESTIONS THE USER MIGHT WANT TO DISCUSS ===
+
+• Fix the NameError in _process_traffic_light() (main.py:472) before the first
+  real-world test — it silently kills every traffic-light announcement.  A quick
+  test run on the Pi will reproduce it immediately.
+
+• Align requirements.txt with actual imports: add pytesseract, remove easyocr /
+  filterpy / pyttsx3.  Also add "tesseract-ocr-bul" to install instructions so
+  Bulgarian OCR in TEXT_READING mode actually works.
+
+• The focal-length constant (CAMERA_FOCAL_LENGTH_PX = 500) is a rough estimate.
+  A one-time calibration (photograph an object of known height at a known
+  distance, solve for f_px) would make navigation-mode distance announcements
+  significantly more accurate and reduce how hard the Kalman filter has to work.
+
+• googletrans 4.0.0-rc1 is known to be brittle (unofficial API endpoint changes
+  break it without warning).  Consider replacing with a local translation model
+  (e.g. Helsinki-NLP MarianMT via ONNX on Pi 4) or storing a larger phrase
+  dictionary so the Google fallback is rarely needed.
+
+• There is no serviceability mechanism: no systemd unit file, no watchdog, no
+  auto-restart on crash.  Adding a simple systemd service (with Restart=on-failure)
+  would make the glasses usable as a standalone device without needing to SSH in
+  to restart after a Python exception.

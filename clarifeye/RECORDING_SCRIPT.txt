@@ -1,0 +1,468 @@
+ClarifEye Audio Recording Script
+=================================
+
+Recording instructions:
+  - Use a quiet environment, decent USB mic
+  - Record at 22050 Hz or higher, mono preferred
+    (we will downsample if needed)
+  - Save as WAV (uncompressed) -- file format conversion will be
+    done by the tools/process_recordings.py script
+  - Trim silence at start/end during your editing pass, or let the
+    processing script do it (recommended: let the script handle it)
+  - One file per phrase, named exactly as shown
+  - Speak naturally, not robotically.
+    Imagine you are guiding a friend.
+
+Save Bulgarian recordings to: data/audio/bg/<filename>.wav
+Save English recordings to:   data/audio/en/<filename>.wav
+
+Then run: python tools/process_recordings.py
+
+======================================================================
+CATEGORY: System messages
+======================================================================
+
+  bg/system_starting.wav
+    Read: ClarifEye стартира
+
+  en/system_starting.wav
+    Read: ClarifEye starting
+
+  bg/system_stopping.wav
+    Read: Системата спира
+
+  en/system_stopping.wav
+    Read: System stopping
+
+  bg/system_recovering.wav
+    Read: Системата се възстановява
+
+  en/system_recovering.wav
+    Read: System recovering
+
+  bg/battery_low.wav
+    Read: Ниска батерия
+
+  en/battery_low.wav
+    Read: Battery low
+
+  bg/language_set_en.wav
+    Read: English
+
+  en/language_set_en.wav
+    Read: English
+
+  bg/language_set_bg.wav
+    Read: Български
+
+  en/language_set_bg.wav
+    Read: Български
+
+  bg/no_detection.wav
+    Read: Нищо не е открито
+
+  en/no_detection.wav
+    Read: Nothing detected
+
+======================================================================
+CATEGORY: Mode names
+======================================================================
+
+  bg/mode_traffic_light.wav
+    Read: Режим светофар
+
+  en/mode_traffic_light.wav
+    Read: Traffic light mode
+
+  bg/mode_navigation.wav
+    Read: Навигационен режим
+
+  en/mode_navigation.wav
+    Read: Navigation mode
+
+  bg/mode_text_reading.wav
+    Read: Режим четене
+
+  en/mode_text_reading.wav
+    Read: Text reading mode
+
+  bg/mode_currency.wav
+    Read: Режим валута
+
+  en/mode_currency.wav
+    Read: Currency mode
+
+  bg/mode_scene.wav
+    Read: Режим описание
+
+  en/mode_scene.wav
+    Read: Scene description mode
+
+======================================================================
+CATEGORY: Warning prefix
+======================================================================
+
+  bg/warning.wav
+    Read: Внимание!
+
+  en/warning.wav
+    Read: Warning!
+
+======================================================================
+CATEGORY: Connector words
+======================================================================
+
+  bg/and.wav
+    Read: и
+
+  en/and.wav
+    Read: (record 0.3 seconds of silence)
+
+======================================================================
+CATEGORY: Positions
+======================================================================
+
+  bg/pos_left.wav
+    Read: отляво
+
+  en/pos_left.wav
+    Read: on the left
+
+  bg/pos_center.wav
+    Read: отпред
+
+  en/pos_center.wav
+    Read: ahead
+
+  bg/pos_right.wav
+    Read: отдясно
+
+  en/pos_right.wav
+    Read: on the right
+
+======================================================================
+CATEGORY: Objects
+======================================================================
+
+  bg/obj_person.wav
+    Read: човек
+
+  en/obj_person.wav
+    Read: person
+
+  bg/obj_bicycle.wav
+    Read: велосипед
+
+  en/obj_bicycle.wav
+    Read: bicycle
+
+  bg/obj_car.wav
+    Read: кола
+
+  en/obj_car.wav
+    Read: car
+
+  bg/obj_motorcycle.wav
+    Read: мотор
+
+  en/obj_motorcycle.wav
+    Read: motorcycle
+
+  bg/obj_bus.wav
+    Read: автобус
+
+  en/obj_bus.wav
+    Read: bus
+
+  bg/obj_truck.wav
+    Read: камион
+
+  en/obj_truck.wav
+    Read: truck
+
+  bg/obj_traffic_light.wav
+    Read: светофар
+
+  en/obj_traffic_light.wav
+    Read: traffic light
+
+  bg/obj_stop_sign.wav
+    Read: стоп знак
+
+  en/obj_stop_sign.wav
+    Read: stop sign
+
+  bg/obj_fire_hydrant.wav
+    Read: пожарен кран
+
+  en/obj_fire_hydrant.wav
+    Read: fire hydrant
+
+  bg/obj_bench.wav
+    Read: пейка
+
+  en/obj_bench.wav
+    Read: bench
+
+======================================================================
+CATEGORY: Traffic lights
+======================================================================
+
+  bg/tl_red.wav
+    Read: Червен светофар
+
+  en/tl_red.wav
+    Read: Red traffic light
+
+  bg/tl_yellow.wav
+    Read: Жълт светофар
+
+  en/tl_yellow.wav
+    Read: Yellow traffic light
+
+  bg/tl_green.wav
+    Read: Зелен светофар
+
+  en/tl_green.wav
+    Read: Green traffic light
+
+======================================================================
+CATEGORY: Distances (centimetres)
+======================================================================
+
+  bg/dist_10_cm.wav
+    Read: 10 сантиметра
+
+  en/dist_10_cm.wav
+    Read: 10 centimeters
+
+  bg/dist_20_cm.wav
+    Read: 20 сантиметра
+
+  en/dist_20_cm.wav
+    Read: 20 centimeters
+
+  bg/dist_30_cm.wav
+    Read: 30 сантиметра
+
+  en/dist_30_cm.wav
+    Read: 30 centimeters
+
+  bg/dist_40_cm.wav
+    Read: 40 сантиметра
+
+  en/dist_40_cm.wav
+    Read: 40 centimeters
+
+  bg/dist_50_cm.wav
+    Read: 50 сантиметра
+
+  en/dist_50_cm.wav
+    Read: 50 centimeters
+
+  bg/dist_60_cm.wav
+    Read: 60 сантиметра
+
+  en/dist_60_cm.wav
+    Read: 60 centimeters
+
+  bg/dist_70_cm.wav
+    Read: 70 сантиметра
+
+  en/dist_70_cm.wav
+    Read: 70 centimeters
+
+  bg/dist_80_cm.wav
+    Read: 80 сантиметра
+
+  en/dist_80_cm.wav
+    Read: 80 centimeters
+
+  bg/dist_90_cm.wav
+    Read: 90 сантиметра
+
+  en/dist_90_cm.wav
+    Read: 90 centimeters
+
+======================================================================
+CATEGORY: Distances (whole metres)
+======================================================================
+
+  bg/dist_1_m.wav  (Bulgarian singular form)
+    Read: 1 метър
+
+  en/dist_1_m.wav
+    Read: 1 meter
+
+  bg/dist_2_m.wav
+    Read: 2 метра
+
+  en/dist_2_m.wav
+    Read: 2 meters
+
+  bg/dist_3_m.wav
+    Read: 3 метра
+
+  en/dist_3_m.wav
+    Read: 3 meters
+
+  bg/dist_4_m.wav
+    Read: 4 метра
+
+  en/dist_4_m.wav
+    Read: 4 meters
+
+  bg/dist_5_m.wav
+    Read: 5 метра
+
+  en/dist_5_m.wav
+    Read: 5 meters
+
+======================================================================
+CATEGORY: Distance — far
+======================================================================
+
+  bg/dist_far.wav
+    Read: далеч
+
+  en/dist_far.wav
+    Read: far away
+
+======================================================================
+CATEGORY: Currency denominations
+======================================================================
+
+  bg/currency_5_lev.wav
+    Read: 5 лева
+
+  en/currency_5_lev.wav
+    Read: 5 leva
+
+  bg/currency_10_lev.wav
+    Read: 10 лева
+
+  en/currency_10_lev.wav
+    Read: 10 leva
+
+  bg/currency_20_lev.wav
+    Read: 20 лева
+
+  en/currency_20_lev.wav
+    Read: 20 leva
+
+  bg/currency_50_lev.wav
+    Read: 50 лева
+
+  en/currency_50_lev.wav
+    Read: 50 leva
+
+  bg/currency_100_lev.wav
+    Read: 100 лева
+
+  en/currency_100_lev.wav
+    Read: 100 leva
+
+  bg/currency_5_eur.wav
+    Read: 5 евро
+
+  en/currency_5_eur.wav
+    Read: 5 euros
+
+  bg/currency_10_eur.wav
+    Read: 10 евро
+
+  en/currency_10_eur.wav
+    Read: 10 euros
+
+  bg/currency_20_eur.wav
+    Read: 20 евро
+
+  en/currency_20_eur.wav
+    Read: 20 euros
+
+  bg/currency_50_eur.wav
+    Read: 50 евро
+
+  en/currency_50_eur.wav
+    Read: 50 euros
+
+  bg/currency_100_eur.wav
+    Read: 100 евро
+
+  en/currency_100_eur.wav
+    Read: 100 euros
+
+  bg/currency_200_eur.wav
+    Read: 200 евро
+
+  en/currency_200_eur.wav
+    Read: 200 euros
+
+======================================================================
+CATEGORY: Action / Feedback  (NEW — added in Prompt 4)
+======================================================================
+
+  bg/action_received.wav
+    Read: OK
+    NOTE: You may record a short beep sound instead of saying "OK" —
+          both work equally well. The system will play whichever WAV
+          you record here when the action button is pressed.
+
+  en/action_received.wav
+    Read: OK
+    NOTE: Same as above — a short beep is a valid alternative to "OK".
+
+  bg/no_text_found.wav
+    Read: Не е намерен текст
+
+  en/no_text_found.wav
+    Read: No text found
+
+  bg/no_currency_found.wav
+    Read: Не е разпозната валута
+
+  en/no_currency_found.wav
+    Read: No currency detected
+
+  bg/processing.wav
+    Read: Обработвам
+
+  en/processing.wav
+    Read: Processing
+
+  bg/language_switched.wav
+    Read: Избран български
+    NOTE: This file plays when the user SWITCHES TO Bulgarian.
+          It announces the new language IN the new language.
+
+  en/language_switched.wav
+    Read: English selected
+    NOTE: This file plays when the user SWITCHES TO English.
+          It announces the new language IN the new language.
+
+  bg/more_text_truncated.wav
+    Read: още текст не прочетен
+    NOTE: Plays after OCR results are capped at 3 blocks, to tell the user
+          there was more text in the scene that was not read aloud.
+
+  en/more_text_truncated.wav
+    Read: more text not read
+    NOTE: Same as above — English variant.
+
+======================================================================
+SUMMARY
+======================================================================
+  Bulgarian (bg/) recordings: 62 files
+  English   (en/) recordings: 62 files
+  Total:                       124 files
+
+  New since Prompt 4 (10 new WAVs to record, not blocking testing):
+    bg/action_received.wav      en/action_received.wav
+    bg/no_text_found.wav        en/no_text_found.wav
+    bg/no_currency_found.wav    en/no_currency_found.wav
+    bg/processing.wav           en/processing.wav
+    bg/language_switched.wav    en/language_switched.wav
+
+  New in Prompt 5 (2 new WAVs):
+    bg/more_text_truncated.wav  en/more_text_truncated.wav
+
